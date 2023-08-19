@@ -59,6 +59,8 @@ enum Cmds {
 struct MkdProduct {
 	#[serde(rename = "DSProductTitle")]
 	title: HashMap<String, String>,
+	#[serde(rename = "DSProductVersion")]
+	ver: String,
 	#[serde(rename = "DSProductContents")]
 	contents: Vec<MkdContent>,
 }
@@ -67,6 +69,8 @@ struct MkdProduct {
 struct MkdContent {
 	#[serde(rename = "DSContentTitle")]
 	title: HashMap<String, String>,
+	#[serde(rename = "DSContentVersion")]
+	ver: String,
 	#[serde(rename = "DSContentDirectory")]
 	dir: String,
 }
@@ -117,10 +121,10 @@ fn scan_dict<D: AsRef<Path>, O: AsRef<Path>>(dir: D, opts: &Opts, out_dir: O) {
 	let json = json[0].to_str().unwrap();
 	// println!("{}", json);
 	let json: MkdProduct = serde_json::from_reader(fs::File::open(json).unwrap()).unwrap();
-	println!("{} [{}]", fmt_ml_str(&json.title), dir_name,);
+	println!("{} [{}({})]", fmt_ml_str(&json.title), dir_name, &json.ver);
 	let mut out_dir = out_dir.as_ref().to_path_buf();
 	for c in json.contents {
-		println!("\t{} [{}]", fmt_ml_str(&c.title), &c.dir);
+		println!("\t{} [{}({})]", fmt_ml_str(&c.title), &c.dir, &c.ver);
 		p.push(&c.dir);
 		out_dir.push(&c.dir);
 		scan_contents(&p, opts, &out_dir);
