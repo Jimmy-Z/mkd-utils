@@ -17,7 +17,7 @@ GPL
 
 Links
 ===
-https://github.com/golddranks/monokakido
-https://github.com/stephenmk/monokakido
-https://github.com/stephenmk/jitenbot
-https://github.com/Jimmy-Z/monokakido
+* https://github.com/golddranks/monokakido
+* https://github.com/stephenmk/monokakido
+* https://github.com/stephenmk/jitenbot
+* https://github.com/Jimmy-Z/monokakido

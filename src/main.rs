@@ -74,10 +74,6 @@ fn main() {
 	}
 }
 
-// base: the base dir for all dicts
-// each sub-dir should have a "Contents" sub-dir
-// for example:
-//	mac: "/Library/Application Support/AppStoreContent/jp.monokakido.Dictionaries/Products/"
 fn scan_base<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: bool, out_dir: O) {
 	for e in fs::read_dir(dir).unwrap() {
 		let e = e.unwrap();
@@ -118,9 +114,6 @@ fn scan_dict<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: boo
 	}
 }
 
-// dir: the content directory of a single dict
-// should be a sub-dir of the "Contents" dir mentioned above
-// should contain sub-dirs like "key"
 fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: bool, out_dir: O) {
 	for d in fs::read_dir(dir).unwrap() {
 		let d = d.unwrap();
@@ -192,7 +185,6 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 			println!("\t\t{}: {}", dn, r.join(", "));
 		}
 
-		// try rsc(map|idx)
 		let safe_get = |k: &str| match l_toc.get(k) {
 			Some(v) => &v[..],
 			None => &[],
