@@ -20,21 +20,31 @@ struct Args {
 	#[command(subcommand)]
 	cmd: Cmds,
 
-	/// explode items from resource archives, dry-run if not specified (default)
+	/// explode items from resource archives, dry-run if not specified
 	#[arg(long, short)]
 	explode: bool,
 
-	/// do not enumerate items in resource archives, has no effect when exploding
+	/// do not enumerate entries in resource archives, has no effect on exploding
 	#[arg(long, short)]
 	shallow: bool,
+
+	/// listing all entries instead of a brief report, has no effect on exploding
+	#[arg(long, short)]
+	detail: bool,
 
 	#[arg(long, short, default_value = "out")]
 	out_dir: String,
 }
 
+struct Opts {
+	explode: bool,
+	shallow: bool,
+	detail: bool,
+}
+
 #[derive(Subcommand)]
 enum Cmds {
-	/// scan a base dir, contains dictionary sub dirs (more description below)
+	/// scan a base dir, contains dictionary dirs (more description below)
 	ScanBase { dir: String },
 
 	/// scan a dictionary dir, should contain a "Contents" sub dir
@@ -63,29 +73,34 @@ struct MkdContent {
 
 fn main() {
 	let args = Args::parse();
+	let opts = Opts {
+		explode: args.explode,
+		shallow: args.shallow,
+		detail: args.shallow,
+	};
 	match args.cmd {
 		Cmds::ScanBase { dir } => {
-			scan_base(&dir, args.explode, args.shallow, &args.out_dir);
+			scan_base(&dir, &opts, &args.out_dir);
 		}
-		Cmds::ScanDict { dir } => scan_dict(&dir, args.explode, args.shallow, &args.out_dir),
+		Cmds::ScanDict { dir } => scan_dict(&dir, &opts, &args.out_dir),
 		Cmds::ScanContents { dir } => {
-			scan_contents(&dir, args.explode, args.shallow, &args.out_dir)
+			scan_contents(&dir, &opts, &args.out_dir)
 		}
 	}
 }
 
-fn scan_base<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: bool, out_dir: O) {
+fn scan_base<D: AsRef<Path>, O: AsRef<Path>>(dir: D, opts: &Opts, out_dir: O) {
 	for e in fs::read_dir(dir).unwrap() {
 		let e = e.unwrap();
 		let p = e.path();
 		if !p.is_dir() {
 			continue;
 		}
-		scan_dict(p, explode, shallow, &out_dir);
+		scan_dict(p, opts, &out_dir);
 	}
 }
 
-fn scan_dict<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: bool, out_dir: O) {
+fn scan_dict<D: AsRef<Path>, O: AsRef<Path>>(dir: D, opts: &Opts, out_dir: O) {
 	let mut p: PathBuf = dir.as_ref().into();
 	let dir_name = p.file_name().unwrap().to_str().unwrap().to_string();
 	// main JSON
@@ -108,13 +123,13 @@ fn scan_dict<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: boo
 		println!("\t{} [{}]", fmt_ml_str(&c.title), &c.dir);
 		p.push(&c.dir);
 		out_dir.push(&c.dir);
-		scan_contents(&p, explode, shallow, &out_dir);
+		scan_contents(&p, opts, &out_dir);
 		p.pop();
 		out_dir.pop();
 	}
 }
 
-fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow: bool, out_dir: O) {
+fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, opts: &Opts, out_dir: O) {
 	for d in fs::read_dir(dir).unwrap() {
 		let d = d.unwrap();
 		let dp = d.path();
@@ -126,9 +141,7 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 
 		// lists and counters
 		let mut l_toc = HashMap::<String, Vec<String>>::new();
-		let mut c_not_file = 0;
-		let mut c_no_ext = 0;
-		let mut c_other = HashMap::<String, isize>::new();
+		let mut counters = Stats::new();
 		// counter helper
 		let mut l_toc_add = |e: &str, n: &str| {
 			l_toc
@@ -136,16 +149,13 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 				.or_insert(Vec::new())
 				.push(n.to_string());
 		};
-		let mut c_other_mod = |e: &str, m: isize| {
-			*c_other.entry(e.to_string()).or_insert(0) += m;
-		};
 		let mut out_dir = out_dir.as_ref().to_path_buf();
 		out_dir.push(dn);
 		for f in fs::read_dir(&dp).unwrap() {
 			let f = f.unwrap();
 			let fp = f.path();
 			if !fp.is_file() {
-				c_not_file += 1;
+				counters.add("not file", 1);
 				continue;
 			}
 			let fname = f.file_name();
@@ -153,7 +163,7 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 			let fext = match fp.extension() {
 				Some(e) => e,
 				None => {
-					c_no_ext += 1;
+					counters.add("no ext", 1);
 					continue;
 				}
 			};
@@ -164,25 +174,12 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 					l_toc_add(fext, fname);
 				}
 				e => {
-					c_other_mod(e, 1);
+					counters.add(e, 1);
 				}
 			};
 		}
-		// collect others and print them in a single line
-		let mut r = Vec::with_capacity(c_other.keys().len() + 2);
-		for (e, c) in c_other.iter() {
-			if *c > 0 {
-				r.push(format!("{}: {}", e, c));
-			}
-		}
-		if c_no_ext > 0 {
-			r.push(format!("no ext: {}", c_no_ext));
-		}
-		if c_not_file > 0 {
-			r.push(format!("not file: {}", c_not_file));
-		}
-		if r.len() > 0 {
-			println!("\t\t{}: {}", dn, r.join(", "));
+		if counters.len() > 0 {
+			println!("\t\t{}: {}", dn, counters);
 		}
 
 		let safe_get = |k: &str| match l_toc.get(k) {
@@ -192,8 +189,8 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 		if safe_get("map").len() == 1 {
 			match mkt::resource::Rsc::new(&dp, &dn) {
 				Ok(mut rsc) => {
-					println!("\t\t\tinitilized rsc(map|idx)");
-					rsc.explode(explode, shallow, &out_dir, derive_ext(dn));
+					println!("\t\t\tinitialized rsc(map|idx)");
+					rsc.explode(opts, &out_dir, derive_ext(dn));
 				}
 				Err(e) => {
 					eprintln!("failed to parse rsc(map|idx): {:?}", e);
@@ -203,8 +200,8 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 		if safe_get("nidx").len() == 1 {
 			match mkt::resource::Nrsc::new(&dp) {
 				Ok(mut nrsc) => {
-					println!("\t\t\tinitilized nrsc(nidx)");
-					nrsc.explode(explode, shallow, &out_dir, derive_ext(dn));
+					println!("\t\t\tinitialized nrsc(nidx)");
+					nrsc.explode(opts, &out_dir, derive_ext(dn));
 				}
 				Err(e) => {
 					eprintln!("failed to parse nrsc(nidx): {:?}", e);
@@ -216,7 +213,7 @@ fn scan_contents<D: AsRef<Path>, O: AsRef<Path>>(dir: D, explode: bool, shallow:
 			p.push(k);
 			match mkt::Keys::new(p) {
 				Ok(keys) => {
-					println!("\t\t\tinitilized keystore from {}", k);
+					println!("\t\t\tinitialized keystore from {}", k);
 					// TODO
 					// keys.explode(explode, out_dir);
 				}
@@ -234,17 +231,16 @@ trait Explode {
 
 	fn explode<P: AsRef<Path>>(
 		&mut self,
-		do_explode: bool,
-		shallow: bool,
+		opts: &Opts,
 		dir: P,
 		ext: Option<&str>,
 	) {
-		println!("\t\t\t\t{} entires", self.len());
-		if !do_explode && shallow {
+		println!("\t\t\t{} entries", self.len());
+		if !opts.explode && opts.shallow {
 			return;
 		}
 
-		if do_explode {
+		if opts.explode {
 			if let Err(e) = fs::create_dir_all(&dir) {
 				eprintln!(
 					"failed to create dir {}: {}",
@@ -256,11 +252,19 @@ trait Explode {
 		}
 
 		let mut p = dir.as_ref().to_path_buf();
+		let mut c_success = 0;
+		let mut c_failure = Stats::new();
 		for idx in 0..self.len() {
 			let (id, asset) = match self.get(idx) {
-				Ok(r) => r,
+				Ok(r) => {
+					r
+				},
 				Err(e) => {
-					eprintln!("failed to get resource {}: {:?}", idx, e);
+					if opts.detail {
+						eprintln!("failed to get resource {}: {:?}", idx, e);
+					} else {
+						c_failure.add(format!("{:?}", e), 1);
+					}
 					continue;
 				}
 			};
@@ -269,8 +273,12 @@ trait Explode {
 				Some(ext) => format!("{}.{}", id, ext),
 				None => id,
 			};
-			println!("\t\t\t\t{}", &an);
-			if !do_explode {
+			if opts.detail {
+				println!("\t\t\t{}", &an);
+			} else {
+				c_success += 1;
+			}
+			if !opts.explode {
 				continue;
 			}
 			p.push(an);
@@ -294,6 +302,13 @@ trait Explode {
 				}
 			}
 			p.pop();
+		}
+		// brief
+		if c_success > 0 {
+			println!("\t\t\tsuccess: {}", c_success);
+		}
+		if c_failure.len() > 0 {
+			println!("\t\t\tfailure: {}", c_failure);
 		}
 	}
 }
@@ -322,9 +337,8 @@ impl Explode for mkt::resource::Nrsc {
 
 fn derive_ext(c_name: &str) -> Option<&'static str> {
 	match c_name {
-		"audio" => Some("aac"),
-		"graphics" => None,
 		"contents" => Some("xml"),
-		_ => Some("bin"),
+		"audio" => Some("aac"),
+		_ => None,
 	}
 }
